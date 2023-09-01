@@ -19,7 +19,7 @@ reply_direction = [
     ["greater", 'lower'],
 ]
 markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
-ACTION, TYPING_COIN, TYPING_DIRECTION, TYPING_PRICE = range(4)
+ACTION, TYPING_COIN, TYPING_DIRECTION, TYPING_PRICE, TYPING_REMOVE_ID = range(5)
 engine = create_engine("sqlite:///mydb.db", echo=True)
 
 Base.metadata.create_all(bind=engine)
@@ -108,6 +108,20 @@ async def list_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def delete_alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Delete an alert by database ID."""
+    command, alert_id = update.message.text.split()
+    user = session.scalars(select(User).filter_by(id_telegram=update.message.from_user.id)).first()
+    alert = session.scalars(select(Alert).filter_by(id=alert_id, user_id=user.id)).first()
+    if alert is not None:
+        session.delete(alert)
+        session.commit()
+        await update.message.reply_text("Alert deleted successfully")
+    else:
+        await update.message.reply_text("Alert not found")
+    return ConversationHandler.END
+
+
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_data = context.user_data
     if "choice" in user_data:
@@ -129,22 +143,25 @@ def remove_job_if_exists(name: str, context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 async def alerting(context: ContextTypes.DEFAULT_TYPE):
     alerts = session.query(Alert, User).join(User)
+
     for alert_local, user in alerts:
         resp = requests.get(binance_url + alert_local.symbol + 'USDT')
+
         if resp.status_code == 200:
             data = resp.json()
             current_price = float(data['price'])
-            match alert_local.direction:
-                case 'lower':
-                    if current_price <= alert_local.target_price:
-                        await context.bot.send_message(chat_id=user.chat_id,
-                                                       text=f'{alert_local.symbol} <= {alert_local.target_price}')
-                        session.query(Alert).filter(Alert.id == alert_local.id).delete()
-                case 'greater':
-                    if current_price >= alert_local.target_price:
-                        await context.bot.send_message(chat_id=user.chat_id,
-                                                       text=f'{alert_local.symbol} >= {alert_local.target_price}')
-                        session.query(Alert).filter(Alert.id == alert.id).delete()
+
+            if alert_local.direction == 'lower':
+                if current_price <= alert_local.target_price:
+                    await context.bot.send_message(chat_id=user.chat_id,
+                                                   text=f'{alert_local.symbol} <= {alert_local.target_price}')
+                    session.query(Alert).filter(Alert.id == alert_local.id).delete()
+            elif alert_local.direction == 'greater':
+                if current_price >= alert_local.target_price:
+                    await context.bot.send_message(chat_id=user.chat_id,
+                                                   text=f'{alert_local.symbol} >= {alert_local.target_price}')
+                    session.query(Alert).filter(Alert.id == alert_local.id).delete()
+
     session.commit()
 
 
@@ -154,6 +171,8 @@ def main() -> None:
     application = Application.builder().token(keys.token).build()
     application.add_handler(CommandHandler("start", register))
     application.add_handler(CommandHandler("list_alert", list_alert))
+    application.add_handler(CommandHandler("delete_alert", delete_alert_command))
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("add_alert", add_alert)],
         states={
