@@ -5,8 +5,15 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from dotenv import load_dotenv
+import os
 
-import keys
+# Load environment variables from .env file
+load_dotenv()
+
+coinmarketcap_api_key = os.getenv('COINMARKETCAP_API_KEY')
+token = os.getenv('TELEGRAM_BOT_TOKEN')
+
 from models.Alert import Alert
 from models.User import User
 from models.base import Base
@@ -27,8 +34,7 @@ Session = sessionmaker(bind=engine)
 session = Session()
 
 alert = Alert
-binance_url = "https://api.binance.com/api/v3/ticker/price?symbol="
-
+coinmarketcap_url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Register a user"""
@@ -144,12 +150,20 @@ def remove_job_if_exists(name: str, context: ContextTypes.DEFAULT_TYPE) -> bool:
 async def alerting(context: ContextTypes.DEFAULT_TYPE):
     alerts = session.query(Alert, User).join(User)
 
+    headers = {
+        'Accepts': 'application/json',
+        'X-CMC_PRO_API_KEY': coinmarketcap_api_key,
+    }
+
     for alert_local, user in alerts:
-        resp = requests.get(binance_url + alert_local.symbol + 'USDT')
+        params = {
+            'symbol': alert_local.symbol,
+        }
+        resp = requests.get(coinmarketcap_url, headers=headers, params=params)
 
         if resp.status_code == 200:
             data = resp.json()
-            current_price = float(data['price'])
+            current_price = float(data['data'][alert_local.symbol]['quote']['USD']['price'])
 
             if alert_local.direction == 'lower':
                 if current_price <= alert_local.target_price:
@@ -168,7 +182,7 @@ async def alerting(context: ContextTypes.DEFAULT_TYPE):
 def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
-    application = Application.builder().token(keys.token).build()
+    application = Application.builder().token(token).build()
     application.add_handler(CommandHandler("start", register))
     application.add_handler(CommandHandler("list_alert", list_alert))
     application.add_handler(CommandHandler("delete_alert", delete_alert_command))

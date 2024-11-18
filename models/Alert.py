@@ -1,10 +1,8 @@
-import requests
 from sqlalchemy import String, ForeignKey
 from sqlalchemy.orm import mapped_column, Mapped
 
 from models.base import Base
-
-binance_url = "https://api.binance.com/api/v3/ticker/price?symbol="
+from services.coinmarketcap_service import CoinMarketCapService
 
 class Alert(Base):
     __tablename__ = "alert"
@@ -15,13 +13,6 @@ class Alert(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"))
 
     def __str__(self):
+        service = CoinMarketCapService()
         return str(self.id) + ' - When ' + self.symbol + ' is ' + self.direction + ' at ' + str(
-            self.target_price) + ' (' + str(self.getCurrentPrice()) + ')'
-
-    def getCurrentPrice(self) -> float:
-        print(binance_url + self.symbol + 'USDT')
-        resp = requests.get(binance_url + self.symbol + 'USDT')
-        if resp.status_code == 200:
-            data = resp.json()
-            return float(data['price'])
-        return -1
+            self.target_price) + ' (' + str(service.get_price(self.symbol)) + ')'
